@@ -1,0 +1,171 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Sonomaps Scene",
+  "type": "object",
+  "required": [
+    "version",
+    "projectId",
+    "name",
+    "tiles",
+    "audioPacks",
+    "layers",
+    "zones"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "projectId": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "tiles": {
+      "type": "string",
+      "description": "Path to MBTiles/PMTiles in bundle"
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional GPX/GeoJSON files for trails"
+    },
+    "audioPacks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "file"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "gainDb": {
+            "type": "number",
+            "default": 0
+          }
+        }
+      }
+    },
+    "layers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "defaultMuted": {
+            "type": "boolean",
+            "default": false
+          },
+          "duckMusicDb": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "zones": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "shape"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer",
+            "default": 0
+          },
+          "shape": {
+            "type": "object",
+            "oneOf": [
+              {
+                "properties": {
+                  "type": {
+                    "const": "circle"
+                  },
+                  "center": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  "radiusM": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "type",
+                  "center",
+                  "radiusM"
+                ]
+              },
+              {
+                "properties": {
+                  "type": {
+                    "const": "polygon"
+                  },
+                  "coordinates": {
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "type",
+                  "coordinates"
+                ]
+              }
+            ]
+          },
+          "enterActions": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "exitActions": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "snapToPath": {
+      "type": "boolean",
+      "default": true
+    },
+    "gps": {
+      "type": "object",
+      "properties": {
+        "normalHz": {
+          "type": "number"
+        },
+        "nearZoneHz": {
+          "type": "number"
+        },
+        "distanceTriggerM": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "projectId": "presque-isle-gull-point",
+  "name": "Presque Isle \u2013 Gull Point Demo",
+  "tiles": "tiles.mbtiles",
+  "routes": [
+    "gull-point-trail.geojson"
+  ],
+  "audioPacks": [
+    {
+      "id": "voiceA",
+      "file": "assets/audio/voiceA.m4a",
+      "gainDb": -3
+    },
+    {
+      "id": "musicA",
+      "file": "assets/audio/musicA.m4a",
+      "gainDb": 0
+    }
+  ],
+  "layers": [
+    {
+      "id": "voice",
+      "defaultMuted": false,
+      "duckMusicDb": -6
+    },
+    {
+      "id": "music",
+      "defaultMuted": false
+    }
+  ],
+  "zones": [
+    {
+      "id": "trailhead",
+      "shape": {
+        "type": "circle",
+        "center": [
+          -80.0856948,
+          42.1714837
+        ],
+        "radiusM": 35
+      },
+      "enterActions": [
+        {
+          "type": "play",
+          "layer": "music",
+          "audioId": "musicA",
+          "fadeInMs": 2000,
+          "loop": true
+        }
+      ],
+      "exitActions": [
+        {
+          "type": "fade",
+          "layer": "music",
+          "toDb": -60,
+          "ms": 1500
+        }
+      ],
+      "priority": 5
+    },
+    {
+      "id": "observation-deck",
+      "shape": {
+        "type": "circle",
+        "center": [
+          -80.0632042,
+          42.1696824
+        ],
+        "radiusM": 35
+      },
+      "enterActions": [
+        {
+          "type": "play",
+          "layer": "voice",
+          "audioId": "voiceA",
+          "fadeInMs": 1200,
+          "loop": false
+        }
+      ],
+      "exitActions": [
+        {
+          "type": "stop",
+          "layer": "voice"
+        }
+      ],
+      "priority": 4
+    }
+  ],
+  "snapToPath": true,
+  "gps": {
+    "normalHz": 0.5,
+    "nearZoneHz": 2.0,
+    "distanceTriggerM": 15
+  }
+}
