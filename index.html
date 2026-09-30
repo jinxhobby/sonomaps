@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Sonomaps</title>
+  
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css" />
+  <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <div id="gateway-splash">
+    <div class="splash-logo">Sonomaps Experience</div>
+    <h1 class="splash-title">Presque Isle State Park</h1>
+    <p class="splash-desc">A location-aware audio environment. Walk into designated zones to shape the soundscape.</p>
+    <button class="btn-start-gateway" id="gateway-start-btn">
+      <span>▶</span> Tap to Walk & Listen
+    </button>
+  </div>
+
+  <div id="top-nav">
+    <div class="nav-left">
+      <div class="glass-pill">
+        <span class="pulse-ring"></span>
+        <span class="brand-title" id="nav-project-title">Presque Isle Sonomap</span>
+      </div>
+    </div>
+    <div class="nav-center">
+      <button class="btn-action btn-mute" id="btn-master-mute">MUTE</button>
+      <button class="btn-action btn-reset" id="btn-master-reset">RESET</button>
+    </div>
+    <div class="nav-right">
+      <button class="btn-action btn-play active-mode" id="btn-play-mode">PLAY</button>
+      <button class="btn-action btn-create" id="btn-create-mode">CREATE/EDIT</button>
+      <button class="btn-action btn-load" id="btn-load-menu">LOAD</button>
+      <button class="btn-action btn-save" id="btn-save-menu">SAVE / SHARE</button>
+    </div>
+  </div>
+
+  <input type="file" id="import-file" accept=".sonomap,.zip,.json" style="display:none;">
+
+  <div id="now-playing-media" class="hidden" data-zone-name="">
+    <div id="np-media-container"></div>
+    <div id="np-desc" class="np-desc-text"></div>
+  </div>
+
+  <div id="explore-hud">
+    <div class="hud-card">
+      <div class="hud-header">
+        <div class="hud-playing-title" id="hud-status-indicator">
+          <span>●</span> <span id="hud-zone-name">Exploring peninsula...</span>
+        </div>
+        <div id="hud-accuracy" style="font-size:10px; color:#64748b;">GPS Standby</div>
+      </div>
+      <div class="hud-subtext" id="hud-details">
+        No active sound zones yet. Switch to CREATE/EDIT mode to build an environment.
+      </div>
+      <div class="hud-actions">
+        <button class="btn-hud btn-hud-gps" id="btn-toggle-walk">📍 Walk (GPS Lock)</button>
+        <button class="btn-hud btn-hud-virtual" id="btn-toggle-explore">🖐 Preview on Map</button>
+      </div>
+      <div class="mixer-container">
+        <div class="mixer-title">Live Stem Mix</div>
+        <div class="mixer-row">
+          <label class="mixer-label" style="color:#a78bfa;">Music</label>
+          <input type="range" id="mix-music" class="mixer-slider" min="0" max="1" step="0.01" value="1">
+        </div>
+        <div class="mixer-row">
+          <label class="mixer-label" style="color:#34d399;">Ambience</label>
+          <input type="range" id="mix-ambi" class="mixer-slider" min="0" max="1" step="0.01" value="1">
+        </div>
+        <div class="mixer-row">
+          <label class="mixer-label" style="color:#38bdf8;">Voice</label>
+          <input type="range" id="mix-voice" class="mixer-slider" min="0" max="1" step="0.01" value="1">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="studio-panel">
+    <div class="studio-header" id="studio-drag-handle">
+      <div>
+        <h3>Creator Studio</h3>
+        <span style="font-size:11px; color:#cbd5e1;">Drag here to move panel</span>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <button id="btn-undo" class="btn-history" disabled>↩ Undo</button>
+        <button id="btn-redo" class="btn-history" disabled>Redo ↪</button>
+      </div>
+    </div>
+    
+    <div class="album-meta-box">
+      <label>Album Cover & Description</label>
+      <input type="file" id="album-media-file" accept="image/*,video/*" style="font-size:11px; margin-bottom:6px; width: 100%;">
+      <textarea id="album-desc" placeholder="Describe the overall Sonomap experience..." rows="2"></textarea>
+    </div>
+
+    <div style="font-size:12px; color:#e2e8f0; margin-bottom:8px; font-weight: 600;">Draw Zones:</div>
+    <div class="btn-row" style="margin-bottom:12px;">
+      <button id="draw-poly-btn" class="btn-studio btn-purple">▱ Polygon</button>
+      <button id="draw-circle-btn" class="btn-studio btn-green">◯ Circle</button>
+      <button id="draw-pencil-btn" class="btn-studio btn-orange">✎ Freehand</button>
+    </div>
+    
+    <div class="carousel-header">
+      <span style="font-size:11px; font-weight:bold; color:#cbd5e1;">Zone Tracks</span>
+      <div class="carousel-controls">
+        <button id="btn-car-prev">◄</button>
+        <span id="carousel-indicator">0 / 0</span>
+        <button id="btn-car-next">►</button>
+      </div>
+    </div>
+    <div id="zone-carousel-view"></div>
+  </div>
+
+  <div id="save-modal" class="modal-overlay">
+    <div class="modal-box">
+      <h3 style="margin-bottom: 6px;">Save & Share Project</h3>
+      <p style="font-size:12px; color:#94a3b8; margin-bottom: 16px;">Download locally or publish to the cloud to share links.</p>
+      <div class="form-group" style="margin-bottom: 20px;">
+        <label>Project Title</label>
+        <input type="text" id="save-project-title" value="Custom Sonomap">
+      </div>
+      <div style="background: rgba(0,0,0,0.2); padding: 14px; border-radius: 8px; margin-bottom: 14px; border: 1px solid rgba(255,255,255,0.05);">
+        <div style="font-size:11px; color:#38bdf8; font-weight:800; margin-bottom: 10px; text-transform:uppercase;">Publish & Share Link</div>
+        <div style="display: flex; gap: 8px; margin-bottom: 4px;">
+          <button class="save-option-btn btn-cloud-save" id="btn-publish-share" style="margin:0; flex:1; font-size:13px; padding: 10px;">☁ Publish to Sonomaps Cloud</button>
+        </div>
+      </div>
+      <button class="save-option-btn btn-local-save" id="btn-download-sonomap">💾 Download .sonomap Bundle</button>
+      <div style="text-align: center; margin-top: 18px;">
+        <button class="btn-cancel-modal" onclick="document.getElementById('save-modal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="config-modal" class="modal-overlay">
+    <div class="modal-box" style="width:480px;">
+      <h3 id="modal-title">Configure Sound Zone</h3>
+      
+      <div class="form-group">
+        <label>Zone Name</label>
+        <input type="text" id="cfg-name">
+      </div>
+
+      <div class="form-group stem-row">
+        <label style="color:#f87171; font-weight:bold;">Track Artwork / Video</label>
+        <input type="file" id="cfg-zone-media" accept="image/*,video/*" style="font-size:11px; margin-bottom:4px;">
+        <textarea id="cfg-zone-desc" placeholder="Track description or liner notes..." rows="2" style="width:100%; background:#0f172a; border:1px solid #475569; color:#fff; border-radius:6px; padding:6px; font-size:12px; margin-top:4px;"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Active Schedule (Local Geolocation Time)</label>
+        <select id="cfg-time-of-day" style="width:100%; padding:10px; background:#0f172a; border:1px solid #475569; color:#fff; border-radius:8px; font-size:12px;">
+          <option value="always">Always Active</option>
+          <option value="split">🌗 Fragment (Custom Split Shift)</option>
+        </select>
+      </div>
+
+      <div id="cfg-fragment-times" style="display:none; gap:10px; margin-top:8px; margin-bottom:14px; background:rgba(0,0,0,0.2); padding:10px; border-radius:8px;">
+         <div style="flex:1;"><label style="font-size:10px; color:#eab308;">Shift 1 Start</label><input type="time" id="cfg-shift1-start" value="06:00" style="width:100%; font-size:11px;"></div>
+         <div style="flex:1;"><label style="font-size:10px; color:#eab308;">Shift 1 End</label><input type="time" id="cfg-shift1-end" value="18:00" style="width:100%; font-size:11px;"></div>
+         <div style="flex:1;"><label style="font-size:10px; color:#818cf8;">Shift 2 Start</label><input type="time" id="cfg-shift2-start" value="18:00" style="width:100%; font-size:11px;"></div>
+         <div style="flex:1;"><label style="font-size:10px; color:#818cf8;">Shift 2 End</label><input type="time" id="cfg-shift2-end" value="06:00" style="width:100%; font-size:11px;"></div>
+      </div>
+
+      <div id="standard-stems-container" class="form-group">
+        <label>Stem Layers (MP3 recommended)</label>
+        <div style="font-size:10px; color:#94a3b8; margin-bottom:8px;">Leave fields empty when editing to keep existing audio.</div>
+        <div class="stem-row">
+          <label style="color:#a78bfa; font-weight:bold;">1. Music Stem</label>
+          <input type="file" id="cfg-music-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-music-url" placeholder="Or URL / (blank = harmonic synth)">
+        </div>
+        <div class="stem-row">
+          <label style="color:#34d399; font-weight:bold;">2. Ambience Stem</label>
+          <input type="file" id="cfg-ambi-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-ambi-url" placeholder="Or URL / (blank = silence)">
+        </div>
+        <div class="stem-row">
+          <label style="color:#38bdf8; font-weight:bold;">3. Voice / Narration Stem</label>
+          <input type="file" id="cfg-voice-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-voice-url" placeholder="Or URL / (blank = silence)">
+        </div>
+      </div>
+
+      <div id="fragment-stems-container" class="form-group" style="display:none;">
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1; border:1px solid #eab308; border-radius:8px; padding:10px; background:rgba(234, 179, 8, 0.05);">
+            <label style="color:#eab308; font-weight:bold; font-size:11px;">☀️ Shift 1 Stems</label>
+            <div class="stem-row"><label style="font-size:10px;">Music</label><input type="file" id="cfg-shift1-music" accept="audio/*" style="font-size:9px;"></div>
+            <div class="stem-row"><label style="font-size:10px;">Ambience</label><input type="file" id="cfg-shift1-ambi" accept="audio/*" style="font-size:9px;"></div>
+            <div class="stem-row"><label style="font-size:10px;">Voice</label><input type="file" id="cfg-shift1-voice" accept="audio/*" style="font-size:9px;"></div>
+          </div>
+          <div style="flex:1; border:1px solid #818cf8; border-radius:8px; padding:10px; background:rgba(67, 56, 202, 0.1);">
+            <label style="color:#818cf8; font-weight:bold; font-size:11px;">🌙 Shift 2 Stems</label>
+            <div class="stem-row"><label style="font-size:10px;">Music</label><input type="file" id="cfg-shift2-music" accept="audio/*" style="font-size:9px;"></div>
+            <div class="stem-row"><label style="font-size:10px;">Ambience</label><input type="file" id="cfg-shift2-ambi" accept="audio/*" style="font-size:9px;"></div>
+            <div class="stem-row"><label style="font-size:10px;">Voice</label><input type="file" id="cfg-shift2-voice" accept="audio/*" style="font-size:9px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <button type="button" id="btn-toggle-advanced" style="width:100%; background:#334155; color:#fff; border:none; padding:10px; border-radius:6px; margin-bottom:14px; cursor:pointer; font-size:12px; font-weight:bold; transition: background 0.2s;">⚙️ Advanced Settings</button>
+      
+      <div id="advanced-settings-panel" style="display:none; background: rgba(0,0,0,0.2); padding: 14px; border-radius: 8px; margin-bottom: 14px; border: 1px solid rgba(255,255,255,0.05);">
+        <div class="form-group" id="cfg-radius-group" style="display:none;">
+          <label>Zone Radius (meters)</label>
+          <input type="number" id="cfg-radius" min="10" max="1500">
+        </div>
+        <div class="form-group" id="cfg-fade-group" style="display:none;">
+          <label>Fade Buffer (meters)</label>
+          <input type="number" id="cfg-fade" min="5" max="500">
+        </div>
+        <div class="form-group">
+          <label style="color:#f472b6;">Zone Audio Effects (FX)</label>
+          <div class="stem-row">
+            <label style="font-size:10px;">Lowpass Filter / Muffle <span id="val-filter">Off</span></label>
+            <input type="range" id="cfg-fx-filter" min="0" max="100" value="0" style="width:100%; margin-bottom:8px;">
+            <label style="font-size:10px;">Delay / Echo <span id="val-delay">0%</span></label>
+            <input type="range" id="cfg-fx-delay" min="0" max="100" value="0" style="width:100%;">
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-studio btn-green" id="cfg-save-btn" style="flex:1;">Save Zone</button>
+        <button class="btn-studio btn-gray" id="cfg-cancel-btn" style="flex:1;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
