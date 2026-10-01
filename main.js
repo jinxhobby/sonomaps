@@ -8,6 +8,7 @@ let audioCtx = null;
 let isRunning = false;
 let liveGpsEnabled = true;
 let isMuted = false;
+let is3DEnabled = false;
 let lastKnownGpsCoords = null;
 let bpm = 120;
 let nextPulseTime = 0;
@@ -20,16 +21,33 @@ let zones = [];
 let pendingZoneData = null;
 let editingZoneId = null;
 let currentCarouselIndex = 0;
+let isStudioMinimized = false;
 
 let historyStack = [];
 let redoStack = [];
+let selectedSceneId = null; 
 
-const map = L.map('map', { zoomControl: false, doubleClickZoom: false }).setView([42.1550, -80.0950], 13);
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, attribution: 'Tiles &copy; Esri' }).addTo(map);
+// Base Layers (Swapped CartoDB for Esri Dark Gray to bypass API restrictions)
+const topoLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, attribution: 'Tiles &copy; Esri' });
+const satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, attribution: 'Tiles &copy; Esri' });
+const darkLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, attribution: '&copy; Esri' });
 
-// FIX 1: Native Geoman tools cleanly injected.
+const map = L.map('map', { zoomControl: false, doubleClickZoom: false, layers: [topoLayer] }).setView([42.1550, -80.0950], 13);
+
+const baseMaps = {
+  "🗺️ Topographic": topoLayer,
+  "🛰️ Satellite": satLayer,
+  "🌙 Night Mode": darkLayer
+};
+L.control.layers(baseMaps, null, { position: 'bottomright' }).addTo(map);
+
+// Native Geoman tools cleanly injected with 30px snap.
 map.pm.addControls({ position: 'topleft', drawMarker: false, drawCircleMarker: false, drawPolyline: false, drawText: false, cutPolygon: false, rotateMode: false, drawRectangle: false });
-map.pm.setGlobalOptions({ snappable: true, snapDistance: 60, snapTolerance: 60, pathOptions: { color: '#8b5cf6', fillColor: '#8b5cf6', fillOpacity: 0.3 } });
+map.pm.setGlobalOptions({ snappable: true, snapDistance: 30, snapTolerance: 30, pathOptions: { color: '#8b5cf6', fillColor: '#8b5cf6', fillOpacity: 0.3 } });
+
+// Hide Geoman toolbar on initial load (since PLAY mode is the default)
+const initialPmToolbar = document.querySelector('.leaflet-pm-toolbar');
+if (initialPmToolbar) initialPmToolbar.style.display = 'none';
 
 const userMarker = L.marker([42.1098, -80.1555], {
   draggable: false, icon: L.divIcon({ className: 'custom-pin', html: '<div id="pin-dot" style="background:#10b981;width:20px;height:20px;border-radius:50%;border:3px solid #1e293b;box-shadow:0 0 10px rgba(0,0,0,0.6);cursor:default;"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }), zIndexOffset: 1000
@@ -75,11 +93,58 @@ function stopDrag() {
   document.removeEventListener('touchend', stopDrag); 
 }
 
+// Studio Minimize / Maximize Logic
+document.getElementById('btn-minimize-studio').addEventListener('click', () => {
+  isStudioMinimized = true;
+  document.getElementById('studio-panel').style.display = 'none';
+  document.getElementById('minimized-studio').classList.remove('hidden');
+});
+
+document.getElementById('minimized-studio').addEventListener('click', () => {
+  isStudioMinimized = false;
+  document.getElementById('minimized-studio').classList.add('hidden');
+  document.getElementById('studio-panel').style.display = 'flex';
+});
+
 window.addEventListener('DOMContentLoaded', async () => {
+  // Splash Audio logic
+  const seagullSfx = new Audio('seagull.mp3');
+  seagullSfx.volume = 0.4;
+  
+  let hasPlayedSplashSound = false;
+  const playSplashSound = () => {
+    if (!hasPlayedSplashSound) {
+      seagullSfx.play().catch(e => console.log("Autoplay prevented:", e));
+      hasPlayedSplashSound = true;
+      document.removeEventListener('click', playSplashSound);
+      document.removeEventListener('touchstart', playSplashSound);
+    }
+  };
+  seagullSfx.play().then(() => { hasPlayedSplashSound = true; }).catch(() => {
+    document.addEventListener('click', playSplashSound);
+    document.addEventListener('touchstart', playSplashSound);
+  });
+
+  if (!localStorage.getItem('sonomaps_tutorial_seen')) {
+    const tutOverlay = document.getElementById('tutorial-overlay');
+    tutOverlay.classList.remove('hidden');
+    tutOverlay.addEventListener('click', () => {
+      tutOverlay.classList.add('hidden');
+      localStorage.setItem('sonomaps_tutorial_seen', 'true');
+    });
+  }
+
+  setInterval(() => {
+    if (isRunning) triggerUpdate();
+  }, 10000);
+
   const urlParams = new URLSearchParams(window.location.search);
   const sceneId = urlParams.get('scene');
+  
   if (sceneId) {
+    document.getElementById('discover-container').style.display = 'none';
     document.getElementById('gateway-start-btn').innerText = "Loading Sonomap...";
+    
     try {
       const { data, error } = await supabase.from('scenes').select('*').eq('id', sceneId).single();
       if (error) throw error;
@@ -89,7 +154,54 @@ window.addEventListener('DOMContentLoaded', async () => {
       map.setView([data.initial_lat, data.initial_lng], data.initial_zoom);
       window.sharedSceneData = data;
       document.getElementById('gateway-start-btn').innerText = "▶ Tap to Walk & Listen";
-    } catch (err) { alert("Failed to load shared scene: " + err.message); document.getElementById('gateway-start-btn').innerText = "▶ Start Empty Session"; }
+    } catch (err) { 
+      alert("Failed to load shared scene: " + err.message); 
+      document.getElementById('gateway-start-btn').innerText = "▶ Start Empty Session"; 
+    }
+  } else {
+    const gallery = document.getElementById('discover-gallery');
+    document.getElementById('car-scroll-left').addEventListener('click', () => { gallery.scrollBy({ left: -240, behavior: 'smooth' }); });
+    document.getElementById('car-scroll-right').addEventListener('click', () => { gallery.scrollBy({ left: 240, behavior: 'smooth' }); });
+
+    try {
+      const { data, error } = await supabase.from('scenes').select('*');
+      if (error) throw error;
+      
+      if (!data || data.length === 0) {
+        gallery.innerHTML = '<div style="color:#94a3b8; font-size:13px; padding: 10px;">No public Sonomaps found. Go create one!</div>';
+        return;
+      }
+
+      data.sort(() => 0.5 - Math.random());
+      gallery.innerHTML = ''; 
+      
+      data.forEach(scene => {
+        const card = document.createElement('div');
+        card.className = 'gallery-card';
+        const coverImg = scene.cover_url 
+          ? `<img src="${scene.cover_url}" class="gallery-cover">` 
+          : `<div class="gallery-cover" style="display:flex; align-items:center; justify-content:center; color:#475569; font-size:11px; font-weight:bold;">NO COVER ART</div>`;
+        
+        card.innerHTML = `
+          ${coverImg}
+          <div class="gallery-info">
+            <div class="gallery-title">${scene.title || 'Untitled Map'}</div>
+            <div class="gallery-desc">${scene.description || 'No description provided.'}</div>
+          </div>
+        `;
+        
+        card.addEventListener('click', () => {
+          document.querySelectorAll('.gallery-card').forEach(c => c.classList.remove('selected-glow'));
+          card.classList.add('selected-glow');
+          selectedSceneId = scene.id;
+          document.getElementById('gateway-start-btn').innerHTML = `<span>▶</span> Start: ${scene.title}`;
+        });
+        
+        gallery.appendChild(card);
+      });
+    } catch (err) {
+      gallery.innerHTML = `<div style="color:#ef4444; font-size:13px; padding: 10px;">Failed to load gallery: ${err.message}</div>`;
+    }
   }
 });
 
@@ -131,22 +243,32 @@ function restoreState(newState) {
 
 document.getElementById('btn-create-mode').addEventListener('click', () => {
   document.getElementById('btn-create-mode').classList.add('active-mode'); document.getElementById('btn-play-mode').classList.remove('active-mode');
-  document.getElementById('explore-hud').style.opacity = '0'; document.getElementById('now-playing-media').style.display = 'none'; 
-  setTimeout(() => document.getElementById('explore-hud').style.display = 'none', 200); document.getElementById('studio-panel').style.display = 'flex';
+  document.getElementById('explore-hud').classList.add('hidden'); 
+  document.getElementById('now-playing-media').classList.add('hidden'); 
   
-  const pmToolbar = document.querySelector('.leaflet-pm-toolbar');
-  if (pmToolbar) pmToolbar.style.display = 'block';
-
+  if (isStudioMinimized) {
+    document.getElementById('minimized-studio').classList.remove('hidden');
+    document.getElementById('studio-panel').style.display = 'none';
+  } else {
+    document.getElementById('studio-panel').style.display = 'flex';
+    document.getElementById('minimized-studio').classList.add('hidden');
+  }
+  
+  document.body.classList.remove('mode-play');
   setGpsTracking(false); renderCarousel();
 });
 
 document.getElementById('btn-play-mode').addEventListener('click', () => {
   document.getElementById('btn-play-mode').classList.add('active-mode'); document.getElementById('btn-create-mode').classList.remove('active-mode');
-  document.getElementById('studio-panel').style.display = 'none'; document.getElementById('explore-hud').style.display = 'block'; document.getElementById('now-playing-media').style.display = 'block'; 
-  setTimeout(() => document.getElementById('explore-hud').style.opacity = '1', 10);
+  document.getElementById('studio-panel').style.display = 'none'; 
+  document.getElementById('minimized-studio').classList.add('hidden');
+  document.getElementById('explore-hud').classList.remove('hidden'); 
   
-  const pmToolbar = document.querySelector('.leaflet-pm-toolbar');
-  if (pmToolbar) pmToolbar.style.display = 'none';
+  if (document.getElementById('now-playing-media').dataset.zoneName !== '') {
+    document.getElementById('now-playing-media').classList.remove('hidden'); 
+  }
+  
+  document.body.classList.add('mode-play');
 
   map.pm.disableDraw(); map.pm.disableGlobalEditMode(); cancelFreehand();
   setGpsTracking(true);
@@ -184,10 +306,39 @@ document.getElementById('btn-master-mute').addEventListener('click', (e) => {
 
 document.getElementById('btn-master-reset').addEventListener('click', () => { stepCount = 0; zones.forEach(z => { if (z.stems) z.stems.forEach(s => { if (s.audio) s.audio.currentTime = 0; }); }); });
 
+document.getElementById('btn-toggle-3d').addEventListener('click', (e) => {
+  is3DEnabled = !is3DEnabled;
+  if (is3DEnabled) {
+    e.target.classList.add('active');
+    e.target.innerText = "🎧 3D: ON";
+  } else {
+    e.target.classList.remove('active');
+    e.target.innerText = "🎧 3D: OFF";
+    if (audioCtx && audioCtx.listener.positionX) {
+      const now = audioCtx.currentTime;
+      audioCtx.listener.positionX.setTargetAtTime(0, now, 0.1);
+      audioCtx.listener.positionZ.setTargetAtTime(0, now, 0.1);
+      zones.forEach(z => z.stems.forEach(stem => {
+        if (stem.panner && stem.panner.positionX) {
+          stem.panner.positionX.setTargetAtTime(0, now, 0.1);
+          stem.panner.positionZ.setTargetAtTime(0, now, 0.1);
+        }
+      }));
+    }
+  }
+  triggerUpdate();
+});
+
 function createSingleStemNode(type, source, freq, shiftTag, targetMixBus) {
   const gain = audioCtx.createGain(); gain.gain.cancelScheduledValues(audioCtx.currentTime); gain.gain.setValueAtTime(0, audioCtx.currentTime);
-  const panner = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
-  let targetNode = panner || gain;
+  
+  const panner = audioCtx.createPanner();
+  panner.panningModel = 'HRTF';
+  panner.distanceModel = 'inverse';
+  panner.refDistance = 10;
+  panner.maxDistance = 10000;
+  panner.rolloffFactor = 1;
+  let targetNode = panner;
 
   if (source instanceof Blob || (typeof source === 'string' && source.length > 0)) {
     const url = (source instanceof Blob) ? URL.createObjectURL(source) : source;
@@ -297,13 +448,45 @@ function isTimeInShift(startStr, endStr, dateObj) {
   return currentMin >= sMin || currentMin < eMin; 
 }
 
+function isTimeActive(mode, dateObj, lat, lng) {
+  if (!mode || mode === 'always' || mode === 'split') return true;
+  
+  const current = dateObj.getTime();
+  const h = dateObj.getHours();
+  
+  if (mode === 'day') return h >= 6 && h < 18;
+  if (mode === 'night') return h >= 18 || h < 6;
+  if (mode === 'twilight') return h >= 0 && h < 6;
+  
+  if (typeof SunCalc !== 'undefined') {
+    const times = SunCalc.getTimes(dateObj, lat, lng);
+    if (mode === 'sunrise') return current >= times.dawn.getTime() && current <= times.goldenHourEnd.getTime();
+    if (mode === 'sunset') return current >= times.goldenHour.getTime() && current <= times.dusk.getTime();
+    if (mode === 'goldenHour') return current >= times.goldenHour.getTime() && current <= times.sunsetStart.getTime();
+  }
+  return true;
+}
+
 function updateAudio(lat, lng) {
   if (!audioCtx) return;
   const point = { lat, lng }; let activeZones = [];
   const now = new Date();
   
+  const SCALE = 100000;
+  
+  if (is3DEnabled) {
+    if (audioCtx.listener.positionX) {
+      audioCtx.listener.positionX.setTargetAtTime(lng * SCALE, audioCtx.currentTime, 0.1);
+      audioCtx.listener.positionZ.setTargetAtTime(lat * SCALE, audioCtx.currentTime, 0.1);
+    } else {
+      audioCtx.listener.setPosition(lng * SCALE, 0, lat * SCALE);
+    }
+  }
+  
   zones.forEach(zone => {
-    let vol = 0; let dist = 0; let targetLng = zone.lng;
+    let vol = 0; let dist = 0; 
+    let targetLng = zone.lng;
+    let targetLat = zone.lat; 
     
     if (zone.shapeType === 'circle') {
       dist = getDistance(lat, lng, zone.lat, zone.lng);
@@ -311,7 +494,13 @@ function updateAudio(lat, lng) {
     } else if (zone.shapeType === 'polygon') {
       dist = distToPolygon(point, zone.latlngs);
       if (dist === 0) vol = 1.0; else if (dist < zone.fadeBuffer) vol = 1 - (dist / zone.fadeBuffer);
+      
       targetLng = zone.latlngs.reduce((sum, p) => sum + p.lng, 0) / zone.latlngs.length;
+      targetLat = zone.latlngs.reduce((sum, p) => sum + p.lat, 0) / zone.latlngs.length;
+    }
+    
+    if (!isTimeActive(zone.timeOfDay, now, targetLat, targetLng)) {
+      vol = 0;
     }
     
     zone.targetVolume = vol;
@@ -326,9 +515,21 @@ function updateAudio(lat, lng) {
       const isAudible = (vol * userMult) > 0.005; 
       const stemGainTarget = isAudible ? (vol * stem.baseVol * userMult) : 0.0;
       
-      if (stem.panner) stem.panner.pan.setTargetAtTime(Math.max(-1, Math.min(1, (targetLng - lng) * 400)), audioCtx.currentTime, 0.05);
-      if (stem.audio) { if (!isAudible) { stem.gain.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.1); } else { stem.gain.gain.setTargetAtTime(stemGainTarget, audioCtx.currentTime, 0.05); } } 
-      else if (stem.osc && !isAudible) { stem.gain.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.1); }
+      if (stem.panner && is3DEnabled) {
+        if (stem.panner.positionX) {
+          stem.panner.positionX.setTargetAtTime(targetLng * SCALE, audioCtx.currentTime, 0.05);
+          stem.panner.positionZ.setTargetAtTime(targetLat * SCALE, audioCtx.currentTime, 0.05);
+        } else {
+          stem.panner.setPosition(targetLng * SCALE, 0, targetLat * SCALE);
+        }
+      }
+
+      if (stem.audio) { 
+        if (!isAudible) { stem.gain.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.1); } 
+        else { stem.gain.gain.setTargetAtTime(stemGainTarget, audioCtx.currentTime, 0.05); } 
+      } else if (stem.osc && !isAudible) { 
+        stem.gain.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.1); 
+      }
     });
     
     if (vol > 0.05) activeZones.push({ name: zone.name, vol: Math.round(vol * 100), media: zone.media, desc: zone.desc });
@@ -362,7 +563,7 @@ function updateAudio(lat, lng) {
     } else { hideNowPlaying(); }
   } else {
     document.getElementById('hud-zone-name').innerText = 'Exploring peninsula...';
-    document.getElementById('hud-details').innerText = liveGpsEnabled ? (zones.length > 0 ? 'Walk into any marked sound zone to trigger audio.' : 'No zones available. Switch to CREATE/EDIT to build.') : 'Drag the pin to audition locations.';
+    document.getElementById('hud-details').innerText = liveGpsEnabled ? (zones.length > 0 ? 'Walk into any marked sound zone to trigger audio.' : 'No zones available. Switch to CREATE to build.') : 'Drag the pin to audition locations.';
     hideNowPlaying();
   }
 
@@ -399,10 +600,31 @@ function recenterGps() {
   );
 }
 
-document.getElementById('gateway-start-btn').addEventListener('click', async () => {
+document.getElementById('gateway-start-btn').addEventListener('click', async (e) => {
   if (isRunning) return;
+  const btn = e.currentTarget;
+
+  if (selectedSceneId && !window.sharedSceneData) {
+    btn.innerText = "⏳ Loading Sonomap...";
+    try {
+      const { data, error } = await supabase.from('scenes').select('*').eq('id', selectedSceneId).single();
+      if (error) throw error;
+      document.querySelector('.brand-title').innerText = data.title;
+      document.getElementById('save-project-title').value = data.title;
+      if (data.description) document.getElementById('album-desc').value = data.description;
+      map.setView([data.initial_lat, data.initial_lng], data.initial_zoom);
+      window.sharedSceneData = data;
+    } catch (err) { 
+      alert("Failed to load scene: " + err.message); 
+      btn.innerHTML = "<span>▶</span> Start Empty Session";
+      return; 
+    }
+  }
+
   audioCtx = new (window.AudioContext || window.webkitAudioContext)(); await audioCtx.resume();
-  startMasterClock(); document.getElementById('gateway-splash').classList.add('hidden'); setGpsTracking(true);
+  startMasterClock(); document.getElementById('gateway-splash').classList.add('hidden');
+  
+  setGpsTracking(true);
   
   if (window.sharedSceneData) {
     (window.sharedSceneData.zones || []).forEach(zData => {
@@ -437,6 +659,12 @@ function attachEditListener(layer, targetZone) {
     } else {
       const newLl = layer.getLatLngs(); targetZone.latlngs = Array.isArray(newLl[0]) ? newLl[0] : newLl;
     } updateAudio(userMarker.getLatLng().lat, userMarker.getLatLng().lng);
+  });
+  
+  layer.on('dblclick', () => {
+    if (!document.body.classList.contains('mode-play')) {
+      window.editZone(targetZone.id);
+    }
   });
 }
 
@@ -527,15 +755,16 @@ function renderCarousel() {
   }
   
   let scheduleBadge = '';
-  if (z.timeOfDay === 'split') scheduleBadge = `<span style="background:#064e3b;color:#34d399;border:1px solid #059669;padding:2px 6px;border-radius:4px;font-size:9px;margin-left:8px;font-weight:bold;">🌗 FRAGMENT</span>`;
+  if (z.timeOfDay === 'split') scheduleBadge = `<span style="background:rgba(6, 78, 59, 0.6);color:#34d399;border:1px solid rgba(5, 150, 105, 0.6);padding:2px 6px;border-radius:4px;font-size:9px;margin-left:8px;font-weight:bold;">🌗 FRAGMENT</span>`;
+  else if (z.timeOfDay && z.timeOfDay !== 'always') scheduleBadge = `<span style="background:rgba(71, 85, 105, 0.6);color:#e2e8f0;border:1px solid rgba(100, 116, 139, 0.6);padding:2px 6px;border-radius:4px;font-size:9px;margin-left:8px;font-weight:bold;text-transform:uppercase;">🕗 ${z.timeOfDay}</span>`;
 
   container.innerHTML = `
     <div class="carousel-card">
       <div class="carousel-card-header">
         <span class="carousel-card-title">${z.name} ${scheduleBadge}</span>
         <div>
-          <button onclick="window.editZone('${z.id}')" style="background:#3b82f6;border:none;color:#fff;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:11px;font-weight:bold;margin-right:4px;">✎ Edit</button>
-          <button onclick="window.removeZone('${z.id}')" style="background:#ef4444;border:none;color:#fff;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:11px;font-weight:bold;">✕</button>
+          <button class="btn-studio btn-blue" onclick="window.editZone('${z.id}')" style="padding:4px 8px; font-size:11px; margin-right:4px;">✎ Edit</button>
+          <button class="btn-studio btn-red" onclick="window.removeZone('${z.id}')" style="padding:4px 8px; font-size:11px;">✕</button>
         </div>
       </div>
       ${mediaHtml}
@@ -548,8 +777,6 @@ function renderCarousel() {
 document.getElementById('btn-car-prev').addEventListener('click', () => { if (zones.length > 0) { currentCarouselIndex = (currentCarouselIndex - 1 + zones.length) % zones.length; renderCarousel(); } });
 document.getElementById('btn-car-next').addEventListener('click', () => { if (zones.length > 0) { currentCarouselIndex = (currentCarouselIndex + 1) % zones.length; renderCarousel(); } });
 
-
-// BULLETPROOF TOUCH-SAFE PENCIL TOOL
 let isPencilMode = false; let isDrawingPencil = false; let pencilPoints = []; let pencilLine = null;
 
 function endPencil() {
@@ -589,11 +816,9 @@ map.on('mouseup', endPencil);
 document.addEventListener('mouseup', (e) => { if(isDrawingPencil) endPencil(); });
 document.addEventListener('touchend', (e) => { if(isDrawingPencil) endPencil(); });
 
-// STANDARD GEOMAN DRAW BUTTONS
 document.getElementById('draw-poly-btn').addEventListener('click', () => { isPencilMode = false; map.dragging.enable(); document.getElementById('map').classList.remove('pencil-mode'); map.pm.enableDraw('Polygon'); });
 document.getElementById('draw-circle-btn').addEventListener('click', () => { isPencilMode = false; map.dragging.enable(); document.getElementById('map').classList.remove('pencil-mode'); map.pm.enableDraw('Circle'); });
 
-// FIX 2: Safely delay disableDraw() to prevent Geoman event crash
 map.on('pm:create', (e) => {
   const layer = e.layer; const shape = e.shape; 
   
@@ -619,7 +844,6 @@ map.on('pm:remove', (e) => {
   if (targetZone) window.removeZone(targetZone.id);
 });
 
-// SAFE MODAL OPENER
 function openNewZoneModal(zoneData) {
   try {
     pendingZoneData = zoneData; 
@@ -631,10 +855,16 @@ function openNewZoneModal(zoneData) {
                         'cfg-shift1-music', 'cfg-shift1-ambi', 'cfg-shift1-voice', 'cfg-shift2-music', 'cfg-shift2-ambi', 'cfg-shift2-voice', 'cfg-zone-media', 'cfg-zone-desc'];
     idsToClear.forEach(elId => { const el = document.getElementById(elId); if(el) el.value = ''; });
     
-    document.getElementById('cfg-time-of-day').value = 'always';
-    document.getElementById('standard-stems-container').style.display = 'block';
-    document.getElementById('fragment-stems-container').style.display = 'none';
-    document.getElementById('cfg-fragment-times').style.display = 'none';
+    document.getElementById('cfg-time-of-day').value = zoneData.timeOfDay || 'always';
+    if (zoneData.timeOfDay === 'split') {
+      document.getElementById('standard-stems-container').style.display = 'none';
+      document.getElementById('fragment-stems-container').style.display = 'block';
+      document.getElementById('cfg-fragment-times').style.display = 'flex';
+    } else {
+      document.getElementById('standard-stems-container').style.display = 'block';
+      document.getElementById('fragment-stems-container').style.display = 'none';
+      document.getElementById('cfg-fragment-times').style.display = 'none';
+    }
     
     document.getElementById('cfg-radius-group').style.display = zoneData.shapeType === 'circle' ? 'block' : 'none';
     document.getElementById('cfg-fade-group').style.display = zoneData.shapeType === 'polygon' ? 'block' : 'none';
@@ -722,7 +952,11 @@ document.getElementById('btn-publish-share').addEventListener('click', async (e)
       const ext = albumFile.name.split('.').pop();
       const filePath = `album_${Date.now()}.${ext}`;
       const { error } = await supabase.storage.from('sonomap-assets').upload(filePath, albumFile);
-      if (!error) globalAlbumUrl = supabase.storage.from('sonomap-assets').getPublicUrl(filePath).data.publicUrl;
+      if (error) {
+        console.error("Album upload error:", error);
+      } else {
+        globalAlbumUrl = supabase.storage.from('sonomap-assets').getPublicUrl(filePath).data.publicUrl;
+      }
     }
 
     const dbZones = [];
@@ -738,7 +972,11 @@ document.getElementById('btn-publish-share').addEventListener('click', async (e)
         const ext = z.media.name.split('.').pop();
         const filePath = `zone_media_${Date.now()}_${z.id}.${ext}`;
         const { error } = await supabase.storage.from('sonomap-assets').upload(filePath, z.media);
-        if (!error) zoneDef.mediaUrl = supabase.storage.from('sonomap-assets').getPublicUrl(filePath).data.publicUrl;
+        if (error) {
+          console.error("Zone media upload error:", error);
+        } else {
+          zoneDef.mediaUrl = supabase.storage.from('sonomap-assets').getPublicUrl(filePath).data.publicUrl;
+        }
       } else if (typeof z.media === 'string') {
         zoneDef.mediaUrl = z.media;
       }
@@ -749,11 +987,21 @@ document.getElementById('btn-publish-share').addEventListener('click', async (e)
           const ext = (s.rawSource.name && s.rawSource.name.split('.').pop()) || 'mp3';
           const filePath = `${Date.now()}_${z.id}_${s.category}_${s.shift || 'any'}.${ext}`;
           const { error } = await supabase.storage.from('sonomap-assets').upload(filePath, s.rawSource);
-          if (!error) stemDef.url = supabase.storage.from('sonomap-assets').getPublicUrl(filePath).data.publicUrl;
+          if (error) {
+            console.error("Stem upload error:", error);
+          } else {
+            stemDef.url = supabase.storage.from('sonomap-assets').getPublicUrl(filePath).data.publicUrl;
+          }
         } else if (typeof s.rawSource === 'string') { stemDef.url = s.rawSource; }
         zoneDef.layers.push(stemDef);
       }
       dbZones.push(zoneDef);
+    }
+
+    // SMART FALLBACK: If no global album cover was uploaded, borrow the artwork from the first zone that has one!
+    if (!globalAlbumUrl) {
+      const firstZoneWithArt = dbZones.find(z => z.mediaUrl);
+      if (firstZoneWithArt) globalAlbumUrl = firstZoneWithArt.mediaUrl;
     }
 
     const { data: rowData, error: dbError } = await supabase.from('scenes').insert([{ 
@@ -767,7 +1015,11 @@ document.getElementById('btn-publish-share').addEventListener('click', async (e)
     btn.innerText = "✅ Link Copied!";
     setTimeout(() => { btn.innerText = "☁ Publish to Sonomaps Cloud"; btn.disabled = false; }, 3000);
 
-  } catch (err) { alert("Publish failed: " + err.message); btn.innerText = "☁️ Publish to Sonomaps Cloud"; btn.disabled = false; }
+  } catch (err) { 
+    alert("Publish failed: " + err.message); 
+    btn.innerText = "☁️ Publish to Sonomaps Cloud"; 
+    btn.disabled = false; 
+  }
 });
 
 document.getElementById('btn-download-sonomap').addEventListener('click', async () => {

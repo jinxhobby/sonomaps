@@ -10,18 +10,42 @@
   <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css" />
   <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
   
   <link rel="stylesheet" href="/style.css" />
 </head>
-<body>
+<body class="mode-play">
+
+  <!-- First-time Tutorial Overlay -->
+  <div id="tutorial-overlay" class="hidden">
+    <div class="tut-text">
+      <h2 style="color: #38bdf8; margin-bottom: 16px;">Welcome to Sonomaps</h2>
+      <p>📍 <strong>Walk Mode:</strong> Move physically through the real world to trigger audio zones.</p>
+      <p>🖐 <strong>Preview Mode:</strong> Drag the orange pin to audition sounds anywhere.</p>
+      <p>✏️ <strong>Create Mode:</strong> Draw your own audio boundaries and attach stems.</p>
+      <p>🎧 <strong>3D Audio:</strong> Toggle bottom-left for spatial immersion.</p>
+    </div>
+    <div class="tut-tap">Tap anywhere to begin</div>
+  </div>
 
   <div id="gateway-splash">
-    <div class="splash-logo">Sonomaps Experience</div>
-    <h1 class="splash-title">Presque Isle State Park</h1>
-    <p class="splash-desc">A location-aware audio environment. Walk into designated zones to shape the soundscape.</p>
-    <button class="btn-start-gateway" id="gateway-start-btn">
-      <span>▶</span> Tap to Walk & Listen
-    </button>
+    <div style="display:flex; flex-direction:column; align-items:center; margin-bottom: 40px;">
+      <img src="/sonomaps_logo.png" alt="Sonomaps Logo" class="splash-logo-img">
+      <button class="btn-start-gateway" id="gateway-start-btn">
+        <span>▶</span> Start Empty Session
+      </button>
+    </div>
+
+    <div id="discover-container" style="width: 100%; max-width: 900px; margin: 0 auto; text-align: left; padding: 0 20px;">
+      <h2 style="color: #38bdf8; font-size: 18px; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">Discover Public Sonomaps</h2>
+      <div class="discover-carousel-wrapper">
+        <button id="car-scroll-left" class="carousel-nav-btn left">◄</button>
+        <div id="discover-gallery" class="discover-carousel">
+          <div style="color:#94a3b8; font-size: 13px;">Loading global scenes...</div>
+        </div>
+        <button id="car-scroll-right" class="carousel-nav-btn right">►</button>
+      </div>
+    </div>
   </div>
 
   <div id="top-nav">
@@ -37,7 +61,7 @@
     </div>
     <div class="nav-right">
       <button class="btn-action btn-play active-mode" id="btn-play-mode">PLAY</button>
-      <button class="btn-action btn-create" id="btn-create-mode">CREATE/EDIT</button>
+      <button class="btn-action btn-create" id="btn-create-mode">CREATE</button>
       <button class="btn-action btn-load" id="btn-load-menu">LOAD</button>
       <button class="btn-action btn-save" id="btn-save-menu">SAVE / SHARE</button>
     </div>
@@ -59,7 +83,7 @@
         <div id="hud-accuracy" style="font-size:10px; color:#64748b;">GPS Standby</div>
       </div>
       <div class="hud-subtext" id="hud-details">
-        No active sound zones yet. Switch to CREATE/EDIT mode to build an environment.
+        No active sound zones yet. Switch to CREATE mode to build an environment.
       </div>
       <div class="hud-actions">
         <button class="btn-hud btn-hud-gps" id="btn-toggle-walk">📍 Walk (GPS Lock)</button>
@@ -83,15 +107,20 @@
     </div>
   </div>
 
+  <div id="minimized-studio" class="hidden" title="Restore Creator Studio">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+  </div>
+
   <div id="studio-panel">
     <div class="studio-header" id="studio-drag-handle">
       <div>
         <h3>Creator Studio</h3>
         <span style="font-size:11px; color:#cbd5e1;">Drag here to move panel</span>
       </div>
-      <div style="display:flex; gap:6px;">
-        <button id="btn-undo" class="btn-history" disabled>↩ Undo</button>
-        <button id="btn-redo" class="btn-history" disabled>Redo ↪</button>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <button id="btn-undo" class="btn-history" title="Undo" disabled>↩</button>
+        <button id="btn-redo" class="btn-history" title="Redo" disabled>↪</button>
+        <button id="btn-minimize-studio" class="btn-minimize" title="Minimize Studio">—</button>
       </div>
     </div>
     
@@ -103,9 +132,9 @@
 
     <div style="font-size:12px; color:#e2e8f0; margin-bottom:8px; font-weight: 600;">Draw Zones:</div>
     <div class="btn-row" style="margin-bottom:12px;">
-      <button id="draw-poly-btn" class="btn-studio btn-purple">▱ Polygon</button>
+      <button id="draw-poly-btn" class="btn-studio btn-purple">▱ Poly</button>
       <button id="draw-circle-btn" class="btn-studio btn-green">◯ Circle</button>
-      <button id="draw-pencil-btn" class="btn-studio btn-orange">✎ Freehand</button>
+      <button id="draw-pencil-btn" class="btn-studio btn-orange">✎ Draw</button>
     </div>
     
     <div class="carousel-header">
@@ -158,7 +187,13 @@
       <div class="form-group">
         <label>Active Schedule (Local Geolocation Time)</label>
         <select id="cfg-time-of-day" style="width:100%; padding:10px; background:#0f172a; border:1px solid #475569; color:#fff; border-radius:8px; font-size:12px;">
-          <option value="always">Always Active</option>
+          <option value="always">⏳ Always Active</option>
+          <option value="day">☀️ Day (06:00 - 18:00)</option>
+          <option value="night">🌙 Night (18:00 - 06:00)</option>
+          <option value="twilight">🌠 Twilight (00:00 - 06:00)</option>
+          <option value="sunrise">🌅 Sunrise (Auto-calculated)</option>
+          <option value="goldenHour">🌄 Golden Hour (Auto-calculated)</option>
+          <option value="sunset">🌇 Sunset (Auto-calculated)</option>
           <option value="split">🌗 Fragment (Custom Split Shift)</option>
         </select>
       </div>
@@ -192,13 +227,13 @@
 
       <div id="fragment-stems-container" class="form-group" style="display:none;">
         <div style="display:flex; gap:10px;">
-          <div style="flex:1; border:1px solid #eab308; border-radius:8px; padding:10px; background:rgba(234, 179, 8, 0.05);">
+          <div style="flex:1; border:1px solid rgba(234, 179, 8, 0.4); border-radius:8px; padding:10px; background:rgba(234, 179, 8, 0.05);">
             <label style="color:#eab308; font-weight:bold; font-size:11px;">☀️ Shift 1 Stems</label>
             <div class="stem-row"><label style="font-size:10px;">Music</label><input type="file" id="cfg-shift1-music" accept="audio/*" style="font-size:9px;"></div>
             <div class="stem-row"><label style="font-size:10px;">Ambience</label><input type="file" id="cfg-shift1-ambi" accept="audio/*" style="font-size:9px;"></div>
             <div class="stem-row"><label style="font-size:10px;">Voice</label><input type="file" id="cfg-shift1-voice" accept="audio/*" style="font-size:9px;"></div>
           </div>
-          <div style="flex:1; border:1px solid #818cf8; border-radius:8px; padding:10px; background:rgba(67, 56, 202, 0.1);">
+          <div style="flex:1; border:1px solid rgba(129, 140, 248, 0.4); border-radius:8px; padding:10px; background:rgba(67, 56, 202, 0.1);">
             <label style="color:#818cf8; font-weight:bold; font-size:11px;">🌙 Shift 2 Stems</label>
             <div class="stem-row"><label style="font-size:10px;">Music</label><input type="file" id="cfg-shift2-music" accept="audio/*" style="font-size:9px;"></div>
             <div class="stem-row"><label style="font-size:10px;">Ambience</label><input type="file" id="cfg-shift2-ambi" accept="audio/*" style="font-size:9px;"></div>
@@ -207,7 +242,12 @@
         </div>
       </div>
 
-      <button type="button" id="btn-toggle-advanced" style="width:100%; background:#334155; color:#fff; border:none; padding:10px; border-radius:6px; margin-bottom:14px; cursor:pointer; font-size:12px; font-weight:bold; transition: background 0.2s;">⚙️ Advanced Settings</button>
+      <div class="modal-actions" style="margin-top: 10px; margin-bottom: 14px;">
+        <button class="btn-studio btn-green" id="cfg-save-btn" style="flex:1;">Save Zone</button>
+        <button class="btn-studio btn-gray" id="cfg-cancel-btn" style="flex:1;">Cancel</button>
+      </div>
+
+      <button type="button" id="btn-toggle-advanced" style="width:100%; background:rgba(51, 65, 85, 0.6); color:#fff; border:1px solid rgba(148, 163, 184, 0.3); padding:10px; border-radius:6px; margin-bottom:14px; cursor:pointer; font-size:12px; font-weight:bold; transition: background 0.2s;">⚙️ Advanced Settings</button>
       
       <div id="advanced-settings-panel" style="display:none; background: rgba(0,0,0,0.2); padding: 14px; border-radius: 8px; margin-bottom: 14px; border: 1px solid rgba(255,255,255,0.05);">
         <div class="form-group" id="cfg-radius-group" style="display:none;">
@@ -229,12 +269,10 @@
         </div>
       </div>
 
-      <div class="modal-actions">
-        <button class="btn-studio btn-green" id="cfg-save-btn" style="flex:1;">Save Zone</button>
-        <button class="btn-studio btn-gray" id="cfg-cancel-btn" style="flex:1;">Cancel</button>
-      </div>
     </div>
   </div>
+
+  <button id="btn-toggle-3d" class="btn-3d-toggle">🎧 3D: OFF</button>
 
   <div id="map"></div>
   <script type="module" src="/main.js"></script>

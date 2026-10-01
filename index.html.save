@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Sonomaps</title>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- JSZip for .sonomap packaging -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <!-- Gateway Splash -->
+  <div id="gateway-splash">
+    <div class="splash-logo">Sonomaps Experience</div>
+    <h1 class="splash-title">Presque Isle State Park</h1>
+    <p class="splash-desc">A location-aware audio environment. Walk into designated zones to shape the soundscape.</p>
+    <button class="btn-start-gateway" id="gateway-start-btn">
+      <span>▶</span> Tap to Walk & Listen
+    </button>
+  </div>
+
+  <!-- Top Navigation -->
+  <div id="top-nav">
+    <div class="nav-left">
+      <div class="glass-pill">
+        <span class="pulse-ring"></span>
+        <span class="brand-title" id="nav-project-title">Presque Isle Sonomap</span>
+      </div>
+    </div>
+    
+    <!-- Central Transport Controls -->
+    <div class="nav-center">
+      <button class="btn-action btn-mute" id="btn-master-mute">MUTE</button>
+      <button class="btn-action btn-reset" id="btn-master-reset">RESET</button>
+    </div>
+
+    <!-- Right Action Stack -->
+    <div class="nav-right">
+      <button class="btn-action btn-play active-mode" id="btn-play-mode">PLAY</button>
+      <button class="btn-action btn-create" id="btn-create-mode">CREATE</button>
+      <button class="btn-action btn-load" id="btn-load-menu">LOAD</button>
+      <button class="btn-action btn-save" id="btn-save-menu">SAVE / SHARE</button>
+    </div>
+  </div>
+
+  <!-- Hidden file input for LOAD functionality -->
+  <input type="file" id="import-file" accept=".sonomap,.zip,.json" style="display:none;">
+
+  <!-- Explore HUD -->
+  <div id="explore-hud">
+    <div class="hud-card">
+      <div class="hud-header">
+        <div class="hud-playing-title" id="hud-status-indicator">
+          <span>●</span> <span id="hud-zone-name">Exploring peninsula...</span>
+        </div>
+        <div id="hud-accuracy" style="font-size:10px; color:#64748b;">GPS Standby</div>
+      </div>
+      <div class="hud-subtext" id="hud-details">
+        No active sound zones yet. Switch to CREATE mode to build an environment.
+      </div>
+      <div class="hud-actions">
+        <button class="btn-hud btn-hud-gps" id="btn-toggle-walk">📍 Walk (GPS Lock)</button>
+        <button class="btn-hud btn-hud-virtual" id="btn-toggle-explore">🖐 Preview on Map</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Studio Drawer -->
+  <div id="studio-panel">
+    <div class="studio-header">
+      <div>
+        <h3>Creator Studio</h3>
+        <span style="font-size:11px; color:#cbd5e1;">Local Project Workspace</span>
+      </div>
+    </div>
+    <div style="font-size:12px; color:#e2e8f0; margin-bottom:12px; font-weight: 600;">Add sound zones & modify audio stems:</div>
+    <div class="btn-row">
+      <button id="draw-poly-btn" class="btn-studio btn-purple">+ Draw Polygon</button>
+      <button id="draw-circle-btn" class="btn-studio btn-green">+ Draw Circle</button>
+    </div>
+    
+    <div id="zone-studio-list"></div>
+  </div>
+
+  <!-- Save/Export Modal -->
+  <div id="save-modal" class="modal-overlay">
+    <div class="modal-box">
+      <h3 style="margin-bottom: 6px;">Save & Share Project</h3>
+      <p style="font-size:12px; color:#94a3b8; margin-bottom: 16px;">Download locally or publish to the cloud to share links.</p>
+      
+      <div class="form-group" style="margin-bottom: 20px;">
+        <label>Project Title</label>
+        <input type="text" id="save-project-title" value="Custom Sonomap">
+      </div>
+
+      <!-- Cloud Share Area -->
+      <div style="background: rgba(0,0,0,0.2); padding: 14px; border-radius: 8px; margin-bottom: 14px; border: 1px solid rgba(255,255,255,0.05);">
+        <div style="font-size:11px; color:#38bdf8; font-weight:800; margin-bottom: 10px; text-transform:uppercase;">Publish & Share Link</div>
+        <div style="display: flex; gap: 8px; margin-bottom: 4px;">
+          <button class="save-option-btn btn-cloud-save" id="btn-publish-share" style="margin:0; flex:1; font-size:13px; padding: 10px;">☁️ Publish to Sonomaps Cloud</button>
+        </div>
+      </div>
+
+      <!-- Local Backup Area -->
+      <button class="save-option-btn btn-local-save" id="btn-download-sonomap">💾 Download .sonomap Bundle</button>
+      
+      <div style="text-align: center; margin-top: 18px;">
+        <button class="btn-cancel-modal" onclick="document.getElementById('save-modal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Zone Config Modal -->
+  <div id="config-modal" class="modal-overlay">
+    <div class="modal-box">
+      <h3 id="modal-title">Configure Sound Zone</h3>
+      <div class="form-group">
+        <label>Zone Name</label>
+        <input type="text" id="cfg-name">
+      </div>
+      <div class="form-group" id="cfg-radius-group" style="display:none;">
+        <label>Zone Radius (meters)</label>
+        <input type="number" id="cfg-radius" min="10" max="1500">
+      </div>
+      <div class="form-group" id="cfg-fade-group" style="display:none;">
+        <label>Fade Buffer (meters)</label>
+        <input type="number" id="cfg-fade" min="5" max="500">
+      </div>
+      <div class="form-group">
+        <label>Stem Layers</label>
+        <div class="stem-row">
+          <label style="color:#a78bfa; font-weight:bold;">1. Music Stem</label>
+          <input type="file" id="cfg-music-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-music-url" placeholder="Or URL / (blank = harmonic synth)">
+        </div>
+        <div class="stem-row">
+          <label style="color:#34d399; font-weight:bold;">2. Ambience Stem</label>
+          <input type="file" id="cfg-ambi-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-ambi-url" placeholder="Or URL / (blank = silence)">
+        </div>
+        <div class="stem-row">
+          <label style="color:#38bdf8; font-weight:bold;">3. Voice / Narration Stem</label>
+          <input type="file" id="cfg-voice-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-voice-url" placeholder="Or URL / (blank = silence)">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-studio btn-green" id="cfg-save-btn" style="flex:1;">Save Zone</button>
+        <button class="btn-studio btn-gray" id="cfg-cancel-btn" style="flex:1;">Cancel</button>
+      </div>
+    </div>
+  </div<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Sonomaps</title>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- JSZip for .sonomap packaging -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <!-- Gateway Splash -->
+  <div id="gateway-splash">
+    <div class="splash-logo">Sonomaps Experience</div>
+    <h1 class="splash-title">Presque Isle State Park</h1>
+    <p class="splash-desc">A location-aware audio environment. Walk into designated zones to shape the soundscape.</p>
+    <button class="btn-start-gateway" id="gateway-start-btn">
+      <span>▶</span> Tap to Walk & Listen
+    </button>
+  </div>
+
+  <!-- Top Navigation -->
+  <div id="top-nav">
+    <div class="nav-left">
+      <div class="glass-pill">
+        <span class="pulse-ring"></span>
+        <span class="brand-title" id="nav-project-title">Presque Isle Sonomap</span>
+      </div>
+    </div>
+    
+    <!-- Central Transport Controls -->
+    <div class="nav-center">
+      <button class="btn-action btn-mute" id="btn-master-mute">MUTE</button>
+      <button class="btn-action btn-reset" id="btn-master-reset">RESET</button>
+    </div>
+
+    <!-- Right Action Stack -->
+    <div class="nav-right">
+      <button class="btn-action btn-play active-mode" id="btn-play-mode">PLAY</button>
+      <button class="btn-action btn-create" id="btn-create-mode">CREATE</button>
+      <button class="btn-action btn-load" id="btn-load-menu">LOAD</button>
+      <button class="btn-action btn-save" id="btn-save-menu">SAVE / SHARE</button>
+    </div>
+  </div>
+
+  <!-- Hidden file input for LOAD functionality -->
+  <input type="file" id="import-file" accept=".sonomap,.zip,.json" style="display:none;">
+
+  <!-- Explore HUD -->
+  <div id="explore-hud">
+    <div class="hud-card">
+      <div class="hud-header">
+        <div class="hud-playing-title" id="hud-status-indicator">
+          <span>●</span> <span id="hud-zone-name">Exploring peninsula...</span>
+        </div>
+        <div id="hud-accuracy" style="font-size:10px; color:#64748b;">GPS Standby</div>
+      </div>
+      <div class="hud-subtext" id="hud-details">
+        No active sound zones yet. Switch to CREATE mode to build an environment.
+      </div>
+      <div class="hud-actions">
+        <button class="btn-hud btn-hud-gps" id="btn-toggle-walk">📍 Walk (GPS Lock)</button>
+        <button class="btn-hud btn-hud-virtual" id="btn-toggle-explore">🖐 Preview on Map</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Studio Drawer -->
+  <div id="studio-panel">
+    <div class="studio-header">
+      <div>
+        <h3>Creator Studio</h3>
+        <span style="font-size:11px; color:#cbd5e1;">Local Project Workspace</span>
+      </div>
+    </div>
+    <div style="font-size:12px; color:#e2e8f0; margin-bottom:12px; font-weight: 600;">Add sound zones & modify audio stems:</div>
+    <div class="btn-row">
+      <button id="draw-poly-btn" class="btn-studio btn-purple">+ Draw Polygon</button>
+      <button id="draw-circle-btn" class="btn-studio btn-green">+ Draw Circle</button>
+    </div>
+    
+    <div id="zone-studio-list"></div>
+  </div>
+
+  <!-- Save/Export Modal -->
+  <div id="save-modal" class="modal-overlay">
+    <div class="modal-box">
+      <h3 style="margin-bottom: 6px;">Save & Share Project</h3>
+      <p style="font-size:12px; color:#94a3b8; margin-bottom: 16px;">Download locally or publish to the cloud to share links.</p>
+      
+      <div class="form-group" style="margin-bottom: 20px;">
+        <label>Project Title</label>
+        <input type="text" id="save-project-title" value="Custom Sonomap">
+      </div>
+
+      <!-- Cloud Share Area -->
+      <div style="background: rgba(0,0,0,0.2); padding: 14px; border-radius: 8px; margin-bottom: 14px; border: 1px solid rgba(255,255,255,0.05);">
+        <div style="font-size:11px; color:#38bdf8; font-weight:800; margin-bottom: 10px; text-transform:uppercase;">Publish & Share Link</div>
+        <div style="display: flex; gap: 8px; margin-bottom: 4px;">
+          <button class="save-option-btn btn-cloud-save" id="btn-publish-share" style="margin:0; flex:1; font-size:13px; padding: 10px;">☁️ Publish to Sonomaps Cloud</button>
+        </div>
+      </div>
+
+      <!-- Local Backup Area -->
+      <button class="save-option-btn btn-local-save" id="btn-download-sonomap">💾 Download .sonomap Bundle</button>
+      
+      <div style="text-align: center; margin-top: 18px;">
+        <button class="btn-cancel-modal" onclick="document.getElementById('save-modal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Zone Config Modal -->
+  <div id="config-modal" class="modal-overlay">
+    <div class="modal-box">
+      <h3 id="modal-title">Configure Sound Zone</h3>
+      <div class="form-group">
+        <label>Zone Name</label>
+        <input type="text" id="cfg-name">
+      </div>
+      <div class="form-group" id="cfg-radius-group" style="display:none;">
+        <label>Zone Radius (meters)</label>
+        <input type="number" id="cfg-radius" min="10" max="1500">
+      </div>
+      <div class="form-group" id="cfg-fade-group" style="display:none;">
+        <label>Fade Buffer (meters)</label>
+        <input type="number" id="cfg-fade" min="5" max="500">
+      </div>
+      <div class="form-group">
+        <label>Stem Layers</label>
+        <div class="stem-row">
+          <label style="color:#a78bfa; font-weight:bold;">1. Music Stem</label>
+          <input type="file" id="cfg-music-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-music-url" placeholder="Or URL / (blank = harmonic synth)">
+        </div>
+        <div class="stem-row">
+          <label style="color:#34d399; font-weight:bold;">2. Ambience Stem</label>
+          <input type="file" id="cfg-ambi-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-ambi-url" placeholder="Or URL / (blank = silence)">
+        </div>
+        <div class="stem-row">
+          <label style="color:#38bdf8; font-weight:bold;">3. Voice / Narration Stem</label>
+          <input type="file" id="cfg-voice-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-voice-url" placeholder="Or URL / (blank = silence)">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-studio btn-green" id="cfg-save-btn" style="flex:1;">Save Zone</button>
+        <button class="btn-studio btn-gray" id="cfg-cancel-btn" style="flex:1;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Vite entry point -->
+  <script type="module" src="/main.js"></script>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Sonomaps</title>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- JSZip for .sonomap packaging -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <!-- Gateway Splash -->
+  <div id="gateway-splash">
+    <div class="splash-logo">Sonomaps Experience</div>
+    <h1 class="splash-title">Presque Isle State Park</h1>
+    <p class="splash-desc">A location-aware audio environment. Walk into designated zones to shape the soundscape.</p>
+    <button class="btn-start-gateway" id="gateway-start-btn">
+      <span>▶</span> Tap to Walk & Listen
+    </button>
+  </div>
+
+  <!-- Top Navigation -->
+  <div id="top-nav">
+    <div class="nav-left">
+      <div class="glass-pill">
+        <span class="pulse-ring"></span>
+        <span class="brand-title" id="nav-project-title">Presque Isle Sonomap</span>
+      </div>
+    </div>
+    
+    <!-- Central Transport Controls -->
+    <div class="nav-center">
+      <button class="btn-action btn-mute" id="btn-master-mute">MUTE</button>
+      <button class="btn-action btn-reset" id="btn-master-reset">RESET</button>
+    </div>
+
+    <!-- Right Action Stack -->
+    <div class="nav-right">
+      <button class="btn-action btn-play active-mode" id="btn-play-mode">PLAY</button>
+      <button class="btn-action btn-create" id="btn-create-mode">CREATE</button>
+      <button class="btn-action btn-load" id="btn-load-menu">LOAD</button>
+      <button class="btn-action btn-save" id="btn-save-menu">SAVE / SHARE</button>
+    </div>
+  </div>
+
+  <!-- Hidden file input for LOAD functionality -->
+  <input type="file" id="import-file" accept=".sonomap,.zip,.json" style="display:none;">
+
+  <!-- Explore HUD -->
+  <div id="explore-hud">
+    <div class="hud-card">
+      <div class="hud-header">
+        <div class="hud-playing-title" id="hud-status-indicator">
+          <span>●</span> <span id="hud-zone-name">Exploring peninsula...</span>
+        </div>
+        <div id="hud-accuracy" style="font-size:10px; color:#64748b;">GPS Standby</div>
+      </div>
+      <div class="hud-subtext" id="hud-details">
+        No active sound zones yet. Switch to CREATE mode to build an environment.
+      </div>
+      <div class="hud-actions">
+        <button class="btn-hud btn-hud-gps" id="btn-toggle-walk">📍 Walk (GPS Lock)</button>
+        <button class="btn-hud btn-hud-virtual" id="btn-toggle-explore">🖐 Preview on Map</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Studio Drawer -->
+  <div id="studio-panel">
+    <div class="studio-header">
+      <div>
+        <h3>Creator Studio</h3>
+        <span style="font-size:11px; color:#cbd5e1;">Local Project Workspace</span>
+      </div>
+    </div>
+    <div style="font-size:12px; color:#e2e8f0; margin-bottom:12px; font-weight: 600;">Add sound zones & modify audio stems:</div>
+    <div class="btn-row">
+      <button id="draw-poly-btn" class="btn-studio btn-purple">+ Draw Polygon</button>
+      <button id="draw-circle-btn" class="btn-studio btn-green">+ Draw Circle</button>
+    </div>
+    
+    <div id="zone-studio-list"></div>
+  </div>
+
+  <!-- Save/Export Modal -->
+  <div id="save-modal" class="modal-overlay">
+    <div class="modal-box">
+      <h3 style="margin-bottom: 6px;">Save & Share Project</h3>
+      <p style="font-size:12px; color:#94a3b8; margin-bottom: 16px;">Download locally or publish to the cloud to share links.</p>
+      
+      <div class="form-group" style="margin-bottom: 20px;">
+        <label>Project Title</label>
+        <input type="text" id="save-project-title" value="Custom Sonomap">
+      </div>
+
+      <!-- Cloud Share Area -->
+      <div style="background: rgba(0,0,0,0.2); padding: 14px; border-radius: 8px; margin-bottom: 14px; border: 1px solid rgba(255,255,255,0.05);">
+        <div style="font-size:11px; color:#38bdf8; font-weight:800; margin-bottom: 10px; text-transform:uppercase;">Publish & Share Link</div>
+        <div style="display: flex; gap: 8px; margin-bottom: 4px;">
+          <button class="save-option-btn btn-cloud-save" id="btn-publish-share" style="margin:0; flex:1; font-size:13px; padding: 10px;">☁️ Publish to Sonomaps Cloud</button>
+        </div>
+      </div>
+
+      <!-- Local Backup Area -->
+      <button class="save-option-btn btn-local-save" id="btn-download-sonomap">💾 Download .sonomap Bundle</button>
+      
+      <div style="text-align: center; margin-top: 18px;">
+        <button class="btn-cancel-modal" onclick="document.getElementById('save-modal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Zone Config Modal -->
+  <div id="config-modal" class="modal-overlay">
+    <div class="modal-box">
+      <h3 id="modal-title">Configure Sound Zone</h3>
+      <div class="form-group">
+        <label>Zone Name</label>
+        <input type="text" id="cfg-name">
+      </div>
+      <div class="form-group" id="cfg-radius-group" style="display:none;">
+        <label>Zone Radius (meters)</label>
+        <input type="number" id="cfg-radius" min="10" max="1500">
+      </div>
+      <div class="form-group" id="cfg-fade-group" style="display:none;">
+        <label>Fade Buffer (meters)</label>
+        <input type="number" id="cfg-fade" min="5" max="500">
+      </div>
+      <div class="form-group">
+        <label>Stem Layers</label>
+        <div class="stem-row">
+          <label style="color:#a78bfa; font-weight:bold;">1. Music Stem</label>
+          <input type="file" id="cfg-music-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-music-url" placeholder="Or URL / (blank = harmonic synth)">
+        </div>
+        <div class="stem-row">
+          <label style="color:#34d399; font-weight:bold;">2. Ambience Stem</label>
+          <input type="file" id="cfg-ambi-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-ambi-url" placeho<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Sonomaps</title>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- JSZip for .sonomap packaging -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <!-- Gateway Splash -->
+  <div id="gateway-splash">
+    <div class="splash-logo">Sonomaps Experience</div>
+    <h1 class="splash-title">Presque Isle State Park</h1>
+    <p class="splash-desc">A location-aware audio environment. Walk into designated zones to shape the soundscape.</p>
+    <button class="btn-start-gateway" id="gateway-start-btn">
+      <span>▶</span> Tap to Walk & Listen
+    </button>
+  </div>
+
+  <!-- Top Navigation -->
+  <div id="top-nav">
+    <div class="nav-left">
+      <div class="glass-pill">
+        <span class="pulse-ring"></span>
+        <span class="brand-title" id="nav-project-title">Presque Isle Sonomap</span>
+      </div>
+    </div>
+    
+    <!-- Central Transport Controls -->
+    <div class="nav-center">
+      <button class="btn-action btn-mute" id="btn-master-mute">MUTE</button>
+      <button class="btn-action btn-reset" id="btn-master-reset">RESET</button>
+    </div>
+
+    <!-- Right Action Stack -->
+    <div class="nav-right">
+      <button class="btn-action btn-play active-mode" id="btn-play-mode">PLAY</button>
+      <button class="btn-action btn-create" id="btn-create-mode">CREATE</button>
+      <button class="btn-action btn-load" id="btn-load-menu">LOAD</button>
+      <button class="btn-action btn-save" id="btn-save-menu">SAVE / SHARE</button>
+    </div>
+  </div>
+
+  <!-- Hidden file input for LOAD functionality -->
+  <input type="file" id="import-file" accept=".sonomap,.zip,.json" style="display:none;">
+
+  <!-- Explore HUD -->
+  <div id="explore-hud">
+    <div class="hud-card">
+      <div class="hud-header">
+        <div class="hud-playing-title" id="hud-status-indicator">
+          <span>●</span> <span id="hud-zone-name">Exploring peninsula...</span>
+        </div>
+        <div id="hud-accuracy" style="font-size:10px; color:#64748b;">GPS Standby</div>
+      </div>
+      <div class="hud-subtext" id="hud-details">
+        No active sound zones yet. Switch to CREATE mode to build an environment.
+      </div>
+      <div class="hud-actions">
+        <button class="btn-hud btn-hud-gps" id="btn-toggle-walk">📍 Walk (GPS Lock)</button>
+        <button class="btn-hud btn-hud-virtual" id="btn-toggle-explore">🖐 Preview on Map</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Studio Drawer -->
+  <div id="studio-panel">
+    <div class="studio-header">
+      <div>
+        <h3>Creator Studio</h3>
+        <span style="font-size:11px; color:#cbd5e1;">Local Project Workspace</span>
+      </div>
+    </div>
+    <div style="font-size:12px; color:#e2e8f0; margin-bottom:12px; font-weight: 600;">Add sound zones & modify audio stems:</div>
+    <div class="btn-row">
+      <button id="draw-poly-btn" class="btn-studio btn-purple">+ Draw Polygon</button>
+      <button id="draw-circle-btn" class="btn-studio btn-green">+ Draw Circle</button>
+    </div>
+    
+    <div id="zone-studio-list"></div>
+  </div>
+
+  <!-- Save/Export Modal -->
+  <div id="save-modal" class="modal-overlay">
+    <div class="modal-box">
+      <h3 style="margin-bottom: 6px;">Save & Share Project</h3>
+      <p style="font-size:12px; color:#94a3b8; margin-bottom: 16px;">Download locally or publish to the cloud to share links.</p>
+      
+      <div class="form-group" style="margin-bottom: 20px;">
+        <label>Project Title</label>
+        <input type="text" id="save-project-title" value="Custom Sonomap">
+      </div>
+
+      <!-- Cloud Share Area -->
+      <div style="background: rgba(0,0,0,0.2); padding: 14px; border-radius: 8px; margin-bottom: 14px; border: 1px solid rgba(255,255,255,0.05);">
+        <div style="font-size:11px; color:#38bdf8; font-weight:800; margin-bottom: 10px; text-transform:uppercase;">Publish & Share Link</div>
+        <div style="display: flex; gap: 8px; margin-bottom: 4px;">
+          <button class="save-option-btn btn-cloud-save" id="btn-publish-share" style="margin:0; flex:1; font-size:13px; padding: 10px;">☁️ Publish to Sonomaps Cloud</button>
+        </div>
+      </div>
+
+      <!-- Local Backup Area -->
+      <button class="save-option-btn btn-local-save" id="btn-download-sonomap">💾 Download .sonomap Bundle</button>
+      
+      <div style="text-align: center; margin-top: 18px;">
+        <button class="btn-cancel-modal" onclick="document.getElementById('save-modal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Zone Config Modal -->
+  <div id="config-modal" class="modal-overlay">
+    <div class="modal-box">
+      <h3 id="modal-title">Configure Sound Zone</h3>
+      <div class="form-group">
+        <label>Zone Name</label>
+        <input type="text" id="cfg-name">
+      </div>
+      <div class="form-group" id="cfg-radius-group" style="display:none;">
+        <label>Zone Radius (meters)</label>
+        <input type="number" id="cfg-radius" min="10" max="1500">
+      </div>
+      <div class="form-group" id="cfg-fade-group" style="display:none;">
+        <label>Fade Buffer (meters)</label>
+        <input type="number" id="cfg-fade" min="5" max="500">
+      </div>
+      <div class="form-group">
+        <label>Stem Layers</label>
+        <div class="stem-row">
+          <label style="color:#a78bfa; font-weight:bold;">1. Music Stem</label>
+          <input type="file" id="cfg-music-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-music-url" placeholder="Or URL / (blank = harmonic synth)">
+        </div>
+        <div class="stem-row">
+          <label style="color:#34d399; font-weight:bold;">2. Ambience Stem</label>
+          <input type="file" id="cfg-ambi-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-ambi-url" placeholder="Or URL / (blank = silence)">
+        </div>
+        <div class="stem-row">
+          <label style="color:#38bdf8; font-weight:bold;">3. Voice / Narration Stem</label>
+          <input type="file" id="cfg-voice-file" accept="audio/*" style="font-size:11px; margin-bottom:4px;">
+          <input type="text" id="cfg-voice-url" placeholder="Or URL / (blank = silence)">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-studio btn-green" id="cfg-save-btn" style="flex:1;">Save Zone</button>
+        <button class="btn-studio btn-gray" id="cfg-cancel-btn" style="flex:1;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Vite entry point -->
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
